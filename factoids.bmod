@@ -15,18 +15,19 @@
 # Copyright 2012,2014 - Øyvind 'bolt' Hvidsten	 <bolt@dhampir.no>
 
 ! ${GHOST:-false} || return 0
+[[ -n "${DATA:-}" ]] || { sf_println2 "$MOD: \$DATA is unset!"; return 1; }
 
-factoids_factsfile="$CONFIG/factoids.dat"
-factoids_db="$CONFIG/factoids.db"
+factoids_factsfile="$DATA/factoids.dat"
+factoids_db="$DATA/factoids.db"
 
 # backwards compatibility - import factoids
-if [[ -e "$CONFIG/factoids_new.dat" ]]; then
-	cat "$CONFIG/factoids_new.dat" >>"$factoids_factsfile"
-	mv "$CONFIG/factoids_new.dat" "$CONFIG/factoids_new.dat.old"
+if [[ -e "$DATA/factoids_new.dat" ]]; then
+	cat "$DATA/factoids_new.dat" >>"$factoids_factsfile"
+	mv "$DATA/factoids_new.dat" "$DATA/factoids_new.dat.old"
 fi
-if [[ -e "$CONFIG/factoids_approved.dat" ]]; then
-	cat "$CONFIG/factoids_approved.dat" >>"$factoids_factsfile"
-	mv "$CONFIG/factoids_approved.dat" "$CONFIG/factoids_approved.dat.old"
+if [[ -e "$DATA/factoids_approved.dat" ]]; then
+	cat "$DATA/factoids_approved.dat" >>"$factoids_factsfile"
+	mv "$DATA/factoids_approved.dat" "$DATA/factoids_approved.dat.old"
 fi
 
 # using the database
@@ -113,11 +114,11 @@ function factoids_learn
 		[[ -z "$creator" ]] ||
 		[[ -z "$value" ]]
 	then
-		sf_stdoutv "$MOD: Unable to learn factoid. Invalid input data:"
-		sf_stdoutv "$MOD: key:	   $key"
-		sf_stdoutv "$MOD: orig:    $orig"
-		sf_stdoutv "$MOD: creator: $creator"
-		sf_stdoutv "$MOD: value:   $value"
+		! $verbose || sf_println "$MOD: Unable to learn factoid. Invalid input data:"
+		! $verbose || sf_println "$MOD: key:	   $key"
+		! $verbose || sf_println "$MOD: orig:    $orig"
+		! $verbose || sf_println "$MOD: creator: $creator"
+		! $verbose || sf_println "$MOD: value:   $value"
 		factoids_error
 	else
 		fact_db set -k "$key" -c "orig" -v "$orig"
@@ -222,23 +223,23 @@ function factoids_replace_reply
 			action=true
 		elif [[ "$value" = "<rand>" ]]; then
 			case "$((RANDOM%17))" in
-				 0) value="I agree!" ;;
-				 1) value="Most definitely!" ;;
-				 2) value="Sure thing!" ;;
-				 3) value="Yes?" ;;
-				 4) value="Maybe?" ;;
-				 5) value="O.o" ;;
-				 6) value="-.-" ;;
-				 7) value="Somehow I doubt that." ;;
-				 8) value="Nah." ;;
-				 9) value="Nope!" ;;
-				10) value="Nu-huh!" ;;
-				11) value="Probably?" ;;
-				12) value="Why not?" ;;
-				13) value="Meh." ;;
+				 0) value='I agree!' ;;
+				 1) value='Most definitely!' ;;
+				 2) value='Sure thing!' ;;
+				 3) value='Yes?' ;;
+				 4) value='Maybe?' ;;
+				 5) value='O.o' ;;
+				 6) value='-.-' ;;
+				 7) value='Somehow I doubt that.' ;;
+				 8) value='Nah.' ;;
+				 9) value='Nope!' ;;
+				10) value='Nu-huh!' ;;
+				11) value='Probably?' ;;
+				12) value='Why not?' ;;
+				13) value='Meh.' ;;
 				14) value="I don't care :D" ;;
-				15) value="No idea! \o/" ;;
-				 *) value="Right!" ;;
+				15) value='No idea! \o/' ;;
+				 *) value='Right!' ;;
 			esac
 		else
 			case "$((RANDOM%6))" in
@@ -255,7 +256,7 @@ function factoids_replace_reply
 	fi
 
 	if [[ -z "$value" ]]; then
-		sf_warning "$MOD: null value about to be printed - aborting"
+		sf_println2 "Warning: $MOD: null value about to be printed - aborting"
 		return
 	fi
 
@@ -277,16 +278,16 @@ function factoids_replace_reply
 		value="${value//%u/$(sf_unixtime)}"
 
 		# mirc colours
-		value="${value//%x02/$(echo -e "\x02")}"
-		value="${value//%x03/$(echo -e "\x03")}"
-		value="${value//%x09/$(echo -e "\x09")}"
-		value="${value//%x0f/$(echo -e "\x0f")}"
-		value="${value//%x0F/$(echo -e "\x0f")}"
-		value="${value//%x13/$(echo -e "\x13")}"
-		value="${value//%x15/$(echo -e "\x15")}"
-		value="${value//%x16/$(echo -e "\x16")}"
-		value="${value//%x1f/$(echo -e "\x1f")}"
-		value="${value//%x1F/$(echo -e "\x1f")}"
+		value="${value//%x02/$(echo -e '\x02')}"
+		value="${value//%x03/$(echo -e '\x03')}"
+		value="${value//%x09/$(echo -e '\x09')}"
+		value="${value//%x0f/$(echo -e '\x0f')}"
+		value="${value//%x0F/$(echo -e '\x0f')}"
+		value="${value//%x13/$(echo -e '\x13')}"
+		value="${value//%x15/$(echo -e '\x15')}"
+		value="${value//%x16/$(echo -e '\x16')}"
+		value="${value//%x1f/$(echo -e '\x1f')}"
+		value="${value//%x1F/$(echo -e '\x1f')}"
 
 		# input data replacements
 		read -r i alldata <<<"$data"
@@ -438,7 +439,7 @@ function factoids_process
 						"by:"*)
 							local skip="${data_larray[1]}"
 							skip="${skip#*:}"
-							if ! sf_integer -vq -- "$skip"; then
+							if ! sf_integer -v -- "$skip"; then
 								reply "Invalid skip option"
 								return
 							fi
@@ -450,7 +451,7 @@ function factoids_process
 						"search:"*|"find:"*)
 							local skip="${data_larray[1]}"
 							skip="${skip#*:}"
-							if ! sf_integer -vq -- "$skip"; then
+							if ! sf_integer -v -- "$skip"; then
 								reply "Invalid skip option"
 								return
 							fi
@@ -462,7 +463,7 @@ function factoids_process
 						"key:"*)
 							local skip="${data_larray[1]}"
 							skip="${skip#*:}"
-							if ! sf_integer -vq -- "$skip"; then
+							if ! sf_integer -v -- "$skip"; then
 								reply "Invalid skip option"
 								return
 							fi

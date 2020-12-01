@@ -21,10 +21,10 @@ if
 	{ [[ -z "${fifo_fd:-}" ]] && sf_mkfifo -qf "$FIFO" >/dev/null; } ||
 	{ [[ -z "${fifo_fd:-}" ]] && [[ -p "$FIFO" ]]; }
 then
-	sf_stdout "FIFO: $FIFO"
+	sf_println "FIFO: $FIFO"
 	exec {fifo_fd}<>"$FIFO"
 elif [[ -z "${fifo_fd:-}" ]]; then
-	sf_error "FIFO is FUBAR: ${FIFO:-}"
+	sf_println2 "Error: FIFO is FUBAR: ${FIFO:-}"
 	exit 1
 fi
 
@@ -34,7 +34,7 @@ function fifo_tick
 	while read -t0 -r -u "$fifo_fd"; do
 		read -t1 -r -u "$fifo_fd" line || break
 		[[ -n "$line" ]] || continue
-		sf_stdout "$MOD: $line"
+		sf_println "$MOD: $line"
 		tx "$line"
 	done
 }

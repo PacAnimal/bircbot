@@ -16,13 +16,15 @@
 
 ! ${GHOST:-false} || return 0
 
-karma_file="$CONFIG/karma.dat"
+[[ -n "${DATA:-}" ]] || { sf_println2 "$MOD: \$DATA is unset!"; return 1; }
+
+karma_file="$DATA/karma.dat"
 
 function karma_save
 {
 	local t n
 
-	sf_stdoutv "$MOD: Writing $karma_file"
+	! $verbose || sf_println "$MOD: Writing $karma_file"
 	sf_mkfile -qo t 
 	for n in "${!karma[@]}"; do
 		echo "$n"$'\t'"${karma["$n"]}" >>"$t" 

@@ -41,18 +41,6 @@ function banter_do
 		fi
 	done
 	case "${data,,}" in
-		*"?")	
-			if ((RANDOM%30 == 0)); then
-				say "$target" "Yes."
-			elif ((RANDOM%30 == 0)); then
-				say "$target" "No."
-			fi
-		;;
-		*"!")	
-			if ((RANDOM%3 == 0)); then
-				say "$target" "Quit shouting!"
-			fi
-		;;
 		*" :dd "*|*":d")
 			say "$target" ":D"
 		;;
@@ -62,7 +50,7 @@ function banter_do
 			fi
 		;;
 		"Thanks"|"thanks"|"thank you"|"Thanks you")
-			say "$target" "No! THANK YOU!"
+			say "$target" "You're welcome :)"
 		;;
 		"ls"|"ls "*)
 			say "$target" "file dir idiot.txt"
@@ -152,6 +140,18 @@ function banter_do
 		;;
 		":wq")
 			say "$target" "\"/tmp/dumbass\" written. 0 bytes."
+		;;
+		*"?")	
+			if ((RANDOM%30 == 0)); then
+				say "$target" "Yes."
+			elif ((RANDOM%30 == 0)); then
+				say "$target" "No."
+			fi
+		;;
+		*"!")	
+			if ((RANDOM%3 == 0)); then
+				say "$target" "Quit shouting!"
+			fi
 		;;
 		*)
 			if ((RANDOM%100 == 0)); then

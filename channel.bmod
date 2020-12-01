@@ -14,8 +14,10 @@
 
 # Copyright 2012 - Øyvind 'bolt' Hvidsten   <bolt@dhampir.no>
 
-channel_seen_db="$CONFIG/seen.db"
-channel_max_db="$CONFIG/max.db"
+[[ -n "${DATA:-}" ]] || { sf_println2 "$MOD: \$DATA is unset!"; return 1; }
+
+channel_seen_db="$DATA/seen.db"
+channel_max_db="$DATA/max.db"
 
 # using the database
 function seen_db
@@ -32,27 +34,27 @@ function max_db
 }
 
 # migration to bashdb
-if [[ -e "$CONFIG/max.dat" ]]; then
+if [[ -e "$DATA/max.dat" ]]; then
 	(
 		while IFS=" " read -r c m; do
 			max_db set -k "$c" -v "$m"
-		done <"$CONFIG/max.dat"
-		mv "$CONFIG/max.dat" "$CONFIG/max.dat.old"
+		done <"$DATA/max.dat"
+		mv "$DATA/max.dat" "$DATA/max.dat.old"
 	)
 fi
-if [[ -e "$CONFIG/seen.dat" ]]; then
+if [[ -e "$DATA/seen.dat" ]]; then
 	(
 		while IFS=" " read -r n N c t; do
 			seen_db set -k "$n" -c "Nick" -v "$N"
 			seen_db set -k "$n" -c "Channel" -v "$c"
 			seen_db set -k "$n" -c "Time" -v "$t"
-		done <"$CONFIG/seen.dat"
-		mv "$CONFIG/seen.dat" "$CONFIG/seen.dat.old"
+		done <"$DATA/seen.dat"
+		mv "$DATA/seen.dat" "$DATA/seen.dat.old"
 	)
 fi
 
 if [[ -z "${CHANNELS[*]:-}" ]]; then
-	sf_warning "$MOD: No channel specified!"
+	sf_println2 "Warning: $MOD: No channel specified!"
 	return
 fi
 
@@ -67,7 +69,7 @@ function channel_greetname
 	file="$CONFIG/greeting-${channel}.txt"
 	if ${CHANNEL_GREET:-false}; then
 		if ! [[ -e "$file" ]]; then
-			sf_stdoutv "$MOD: No greeting for channel $channel: $file"
+			! $verbose || sf_println "$MOD: No greeting for channel $channel: $file"
 		else
 			if ${CHANNEL_SUBSTRING:-false}; then
 				while
@@ -127,7 +129,7 @@ function channel_changename
 				fi
 			done
 			channel_names["$i"]=${list[*]}
-			sf_stdoutv "$MOD: $src renamed to $target in $i"
+			! $verbose || sf_println "$MOD: $src renamed to $target in $i"
 			channel_seen "$i" "$src"
 			channel_seen "$i" "$target"
 		fi
@@ -138,7 +140,7 @@ function channel_quit
 	local src=$1 i
 	for i in "${!channel_names[@]}"; do
 		if [[ " ${channel_names["$i"]} " = *" $src "* ]]; then
-			sf_stdoutv "$MOD: $src removed from $i"
+			! $verbose || sf_println "$MOD: $src removed from $i"
 			channel_removename "$i" "$src"
 		fi
 	done
@@ -155,24 +157,24 @@ function channel_headcount
 	if [[ -n "$heads" ]]; then
 		((++count))
 	fi
-	sf_stdout $count
+	sf_println "$count"
 }
 function channel_wejoined
 {
 	local channel=$1
-	sf_stdoutv "$MOD: We joined $channel"
+	! $verbose || sf_println "$MOD: We joined $channel"
 	unset 'channel_names[$channel]'
 	current_channels+=( "$channel" )
 }
 function channel_weleft
 {
 	local channel=$1 i
-	sf_stdoutv "$MOD: We left $channel"
+	! $verbose || sf_println "$MOD: We left $channel"
 	unset 'channel_names[$channel]'
 	for i in "${!current_channels[@]}"; do
 		if [[ "${current_channels[i]}" = "$channel" ]]; then
 			unset 'current_channels[i]'
-			sf_stdoutv "$MOD: Channel $i removed"
+			! $verbose || sf_println "$MOD: Channel $i removed"
 			break
 		fi
 	done
@@ -180,7 +182,7 @@ function channel_weleft
 function channel_seen
 {
 	local channel=$1 name=$2
-	sf_stdoutv "$MOD: We saw $name in $channel"
+	! $verbose || sf_println "$MOD: We saw $name in $channel"
 	seen_db set -k "$name" -c "Nick" -v "$name"
 	seen_db set -k "$name" -c "Channel" -v "$channel"
 	seen_db set -k "$name" -c "Time" -v "$(sf_unixtime)"
@@ -276,7 +278,7 @@ case "$cmd" in
 		if [[ "$(src_nick)" = "$nick" ]]; then
 			channel_wejoined "$target"
 		else
-			sf_stdoutv "$MOD: $(src_nick) joined $target"
+			! $verbose || sf_println "$MOD: $(src_nick) joined $target"
 			channel_greetname "$target" "$(src_nick)"
 			channel_addname "$target" "$(src_nick)"
 			channel_trackmax "$target" "$(channel_headcount "$target")"
@@ -286,7 +288,7 @@ case "$cmd" in
 		if [[ "$(src_nick)" = "$nick" ]]; then
 			channel_weleft "$target"
 		else
-			sf_stdoutv "$MOD: $(src_nick) left $target"
+			! $verbose || sf_println "$MOD: $(src_nick) left $target"
 			channel_removename "$target" "$(src_nick)"
 		fi
 	;;
@@ -295,16 +297,16 @@ case "$cmd" in
 			channel_weleft "$target"
 			sf_timer -r "channel_join" 0
 		else
-			sf_stdoutv "$MOD: $(src_nick) kicked ${data%% *} from $target"
+			! $verbose || sf_println "$MOD: $(src_nick) kicked ${data%% *} from $target"
 			channel_removename "$target" "${data%% *}"
 		fi
 	;;
 	QUIT)
-		sf_stdoutv "$MOD: $(src_nick) quit"
+		! $verbose || sf_println "$MOD: $(src_nick) quit"
 		channel_quit "$(src_nick)"
 	;;
 	NICK)
-		sf_stdoutv "$MOD: $(src_nick) is now known as ${target#:}"
+		! $verbose || sf_println "$MOD: $(src_nick) is now known as ${target#:}"
 		channel_changename "$(src_nick)" "${target#:}"
 	;;
 	$ERR_INVITEONLYCHAN)
@@ -316,7 +318,7 @@ case "$cmd" in
 		if $srv; then
 			s=${data#* }
 			s=${s%% :*}
-			sf_stdoutv "$MOD: Names for $s"
+			! $verbose || sf_println "$MOD: Names for $s"
 			IFS=" " read -ra a <<<"${data#* :}"
 			for n in "${a[@]}"; do
 				channel_addname "$s" "$n"
@@ -326,7 +328,7 @@ case "$cmd" in
 	;;
 	$RPL_ENDOFNAMES)
 		if $srv; then
-			sf_stdoutv "$MOD: End of names list"
+			! $verbose || sf_println "$MOD: End of names list"
 		fi
 	;;
 esac
@@ -336,11 +338,11 @@ function channel_tick
 	sf_timer "channel_join" 15 || return 0
 
 	if ${CHANNEL_HIDE:-false} && ! $hidden; then
-		if (( connect_time )) && (( connect_time + 180 < $(sf_unixtime) )); then
-			sf_error "$MOD: Timed out waiting for host to be hidden! Something is FUBAR!"
+		if (( connect_time )) && (( connect_time + 180 < SECONDS )); then
+			sf_println2 "Error: $MOD: Timed out waiting for host to be hidden! Something is FUBAR!"
 			exit 1
 		fi
-		sf_stdout "$MOD: Waiting for host to be hidden before joining channels..."
+		sf_println "$MOD: Waiting for host to be hidden before joining channels..."
 		return 0
 	fi
 
@@ -349,7 +351,7 @@ function channel_tick
 		for d in "${current_channels[@]:-}"; do
 			[[ "$c" != "$d" ]] || continue 2
 		done
-		sf_stdoutv "$MOD: Attempting to join $c"
+		! $verbose || sf_println "$MOD: Attempting to join $c"
 		tx "JOIN $c"
 	done
 }

@@ -28,7 +28,7 @@ function bash_do
 	fi
 
 	local url="http://www.bash.org/?"
-	if [[ -z "${@:-}" ]]; then
+	if [[ -z "${*:-}" ]]; then
 		url+="random1"
 	elif sf_integer "$@"; then
 		url+="$*"
@@ -60,7 +60,7 @@ function bash_do
 			*)     
 				if $printing; then
 					say "$reply" "$line"
-					sleep 0.5
+					sf_sleep 0.5
 				fi
 			;;
 		esac

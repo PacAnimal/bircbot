@@ -20,10 +20,11 @@ if ${GHOST:-false}; then
 	}
 	return 0
 fi
+[[ -n "${DATA:-}" ]] || { sf_println2 "$MOD: \$DATA is unset!"; return 1; }
 
-adminfile="$CONFIG/admin.dat"
-if ! sf_goodfile "$adminfile" && ! sf_mkfile -f "$adminfile"; then
-	sf_error "$MOD: Unable to create admin file!"
+adminfile="$DATA/admin.dat"
+if ! sf_goodfile "$adminfile" && ! sf_mkfile -f "$adminfile" -o _; then
+	sf_println2 "Error: $MOD: Unable to create admin file!"
 	exit 1
 fi
 
@@ -36,7 +37,7 @@ function admin_add
 {
 	local user=${1,,}
 	if admin_has "$user"; then
-		sf_error "$MOD: $FUNCNAME: Attempting to add existing admin $user"
+		sf_println2 "Error: $MOD: $FUNCNAME: Attempting to add existing admin $user"
 		return 1
 	fi
 	echo "$user" >>"$adminfile"
@@ -45,7 +46,7 @@ function admin_remove
 {
 	local user=${1,,} file
 	if ! admin_has "$user"; then
-		sf_error "$MOD: $FUNCNAME: Attempting to remove unknown admin $user"
+		sf_println2 "Error: $MOD: $FUNCNAME: Attempting to remove unknown admin $user"
 		return 1
 	fi
 	sf_mkfile -qo file
@@ -122,7 +123,7 @@ function admin_process
 			while read -r a; do
 				[[ -n "$a" ]] || continue
 				reply "$a"
-				sleep 0.5
+				sf_sleep 0.5
 			done <"$adminfile"
 		;;
 		test)
@@ -130,7 +131,7 @@ function admin_process
 		;;
 		testkill)
 			reply "Killing connection."
-			sleep 1
+			sf_sleep 1
 			kill -TERM "$catpid"
 		;;
 		die|shutdown)
@@ -155,6 +156,6 @@ if
 	[[ -n "${OWNER:-}" ]] &&
 	! admin_has "${OWNER}"
 then
-	sf_stdout "$MOD: Adding owner: $OWNER"
+	sf_println "$MOD: Adding owner: $OWNER"
 	admin_add "$OWNER"
 fi

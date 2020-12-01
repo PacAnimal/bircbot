@@ -17,17 +17,17 @@
 
 case "${cmd^^}" in
 	$ERR_NICKNAMEINUSE)
-		sf_stderr "Freenode: Nickname is already in use."
+		sf_println2 "Freenode: Nickname is already in use."
 		say "NickServ" "GHOST $NICK $PASS"
 		return 0
 	;;
 	$ERR_UNAVAILRESOURCE)
-		sf_stderr "Freenode: Nickname is temporarily unavailable."
+		sf_println2 "Freenode: Nickname is temporarily unavailable."
 		say "NickServ" "RELEASE $NICK $PASS"
 		return 0
 	;;
 	*)
-		sf_stderr "Freenode: Unknown error: ${cmd^^} ${data}"
+		sf_println2 "Freenode: Unknown error: ${cmd^^} ${data}"
 	;;
 esac
 

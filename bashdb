@@ -61,6 +61,29 @@
 # v1.07, 2017.11.25 - Allow empty default
 #                   * When specifying -d, empty strings are allowed
 #
+# v1.08, 2019.02.27 - Simple file type check
+#                   * Attempt to verify that the files we are about to process are
+#                     actually BashDB files
+#
+# v1.09, 2019.01.02 - Fixed binary dump alignment issues
+#                   * Running dumped fields through an extra iconv filter in attempt to
+#                     avoid invalid data being printed
+#
+# v1.10, 2019.08.01 - Fixed a bug where trimming a table and removing the last named column
+#                     would corrupt the database
+#
+# v1.11, 2019.09.05 - Fixed array indexing when negative array values are passed
+#                     (This should produce an error message)
+#                     Added self-test for arrays
+#
+# v1.12, 2020.01.23 - Various bugfixes
+#                   * Not attempting to use non-GNU iconv anymore (looking at you, Alpine)
+#                   * Dumping raw table data without headers now works again
+#
+# v1.13, 2020.06.07 - Static code analysis
+#                   * Minor changes to appease the (updated) code analysis gods
+#
+
 
 # include guard (..ish)
 if [[ -z "${_db_loaded:-}" ]]; then
@@ -69,8 +92,10 @@ else
     return 0
 fi
 
+
 # needed for runfunc to find the functions
 _bashdb_header="db_"
+
 
 # show the help!
 function db_help
@@ -110,6 +135,7 @@ function db_help
 	db_selftest -?
 }
 
+
 # print help
 function _db_help
 {
@@ -121,6 +147,7 @@ function _db_help
 	} >&2
 }
 
+
 # printing stuff
 function _db_print { printf '%s' "$*" 2>/dev/null; }
 function _db_println { printf '%s\n' "$*" 2>/dev/null; }
@@ -128,7 +155,7 @@ function _db_print0 { printf '%s\0' "$*" 2>/dev/null; }
 function _db_usage { _db_println "Usage: ${FUNCNAME[1]} $*" >&2; }
 function _db_error { _db_println "Error: $*" >&2; }
 function _db_func_error { _db_println "Error: ${FUNCNAME[1]}: $*" >&2; }
-function _db_badarg { _db_error '%s\n' "${FUNCNAME[1]}: Option -${OPTARG} requires an argument"; }
+function _db_badarg { _db_error "${FUNCNAME[1]}: Option -${OPTARG} requires an argument"; }
 function _db_badopt { _db_error "${FUNCNAME[1]}: Unknown option -${OPTARG}"; }
 function _db_debug { ! ${DB_DEBUG:-false} || printf 'DEBUG: %s %s\n' "${FUNCNAME[1]}" "$*" >&2 2>/dev/null; }
 function _db_noparam { _db_error "${FUNCNAME[1]}: Missing parameter: $*"; }
@@ -136,6 +163,7 @@ function _db_extra_opt { _db_error "${FUNCNAME[1]}: Unknown parameter: $*"; ${FU
 function _db_print_end { if ${1:-false}; then _db_println; else _db_print0; fi; }
 function _db_print_pad { _db_print "$2"; local pad; pad=$(($1 - ${#2})); if ((pad > 0)); then printf "%$(($1 - ${#2}))s" 2>/dev/null; fi; }
 function _db_tsprint { _db_print "$(date +'%Y-%m-%d %H:%M:%S (%z)') - $*"; }
+
 
 # read opts
 function _db_read_opt
@@ -155,6 +183,7 @@ function _db_read_opt
 	fi
 }
 
+
 # check that a database exists, or create it
 function _db_check
 {
@@ -173,8 +202,8 @@ function _db_check
 	shift $((OPTIND-1))
 	if [[ "${1:-}" = "--" ]]; then shift; fi
 
-	# read column spec
-	local file=$1 colspec
+	# check that the file exists, or create it
+	local file=$1
 	if ! [[ -e "$file" ]] && ! touch "$file" 2>/dev/null; then
 		_db_error "Failed to create database: $file"
 		return 1
@@ -184,7 +213,14 @@ function _db_check
 	[[ -f "$file" ]] || { _db_error "$file is not a regular file!"; return 1; }
 	[[ -r "$file" ]] || { _db_error "File $file is not readable!"; return 1; }
 	! $write || [[ -w "$file" ]] || { _db_error "File $file is not writable!"; return 1; }
+
+	# check that this is a valid database file, or an empty file
+	if [[ "$(_db_get_head "$file")" != "bashdb|"* ]] && (( $(stat "$file" --format='%s') )); then
+		_db_error "Invalid database file: $file"
+		return 1
+	fi
 }
+
 
 # verify that a database is relatively ok...
 function db_verify
@@ -227,10 +263,12 @@ EOF
 	# nothing to do here...
 }
 
+
 # reading files
-function _db_get_data { grep -v "^bashdb|" "$1"; }
-function _db_get_head { grep -m 1 "^bashdb|" "$1"; }
+function _db_get_data { grep -v "^bashdb|" "$1" || :; }
+function _db_get_head { head -n 1 "$1" | grep -m 1 "^bashdb|" || :; }
 function _db_get_row { grep -m 1 "^${2}|" "$1"; }
+
 
 # get the columns
 function _db_get_cols
@@ -255,9 +293,9 @@ function _db_get_cols
 	(( $# == 0 )) || { _db_extra_opt "$@"; return 1; }
 	_db_check "$file" || return 1
 
-	# read the first line (the colspec)A
+	# read the first line (the colspec)
 	local line
-	line=$(head -n 1 "$file")
+	line=$(_db_get_head "$file")
 
 	# verify that this is a database or an empty file
 	if [[ "$line" != "bashdb|"* ]] && (( $(stat "$file" --format='%s') )); then
@@ -269,6 +307,7 @@ function _db_get_cols
 	_db_print "${line#bashdb}"
 }
 
+
 # check if colspec has column
 function _db_colspec_contains
 {
@@ -276,6 +315,7 @@ function _db_colspec_contains
 	local cols=$1 col=$2
 	[[ "${cols}|" = *"|${col}|"* ]]
 }
+
 
 # get index of column in return value from _db_get_cols
 function _db_get_col_index
@@ -289,6 +329,7 @@ function _db_get_col_index
 	_db_print "$index"
 }
 
+
 # encode/decode
 function _db_encode
 {
@@ -300,6 +341,7 @@ function _db_encode
 }
 function _db_decode { base64 -d 2>/dev/null; }
 
+
 # get a value
 function db_get
 {
@@ -308,7 +350,7 @@ function db_get
 	# options
 	local file key colname="" default="" use_default=false index human=false zero=false colspec column value
 	local OPTIND=1 OPTARG OPTERR opt
-	while getopts ":?c:d:f:hi:k:" opt; do
+	while getopts ":?0c:d:f:hi:k:" opt; do
 	case "$opt" in
 		[?])
 			if [[ "${OPTARG:-}" != '?' ]]; then
@@ -357,7 +399,7 @@ EOF
 	# sanity
 	[[ -n "${file:-}" ]] || { _db_noparam "-f <file>"; return 1; }
 	[[ -n "${key:-}" ]] || { _db_noparam "-k <key>"; return 1; }
-	[[ "${index:-0}" =~ [0-9]+ ]] || { _db_func_error "Invalid index: $index"; return 1; }
+	[[ "${index:-0}" =~ ^[0-9]+$ ]] || { _db_func_error "Invalid index: $index"; return 1; }
 	! $human || ! $zero || { _db_func_error "-0 and -h are mutually exclusive"; return 1; }
 	(( $# == 0 )) || { _db_extra_opt "$@"; return 1; }
 	_db_check "$file" || return 1
@@ -411,6 +453,7 @@ EOF
 	fi
 }
 
+
 # get a temp file in a variable
 function _db_mktemp
 {
@@ -434,6 +477,7 @@ function _db_mktemp
 		shift
 	done
 }
+
 
 # remove a key
 function db_delete
@@ -495,6 +539,7 @@ EOF
 	)
 }
 
+
 # copy a database to a new table, possibly excluding a single column
 # used internally to trim empty columns and to remove columns on command
 function _db_copy
@@ -527,13 +572,19 @@ function _db_copy
 		then
 			columns[i]="$((i+2))"
 		else
-			unset columns[i]
+			unset 'columns[i]'
 		fi
 	done
 
 	# copy
-	cut -d '|' -f "1,$( IFS=','; _db_print "${columns[*]:-}"; )" "$src" | grep -E -v "^[^|]+[|]+$" >"$tgt"
+	local fields
+	fields="1,$( IFS=','; _db_print "${columns[*]:-}"; )"
+	{
+		_db_get_head "$src" | cut -d '|' -f "$fields"
+		_db_get_data "$src" | cut -d '|' -f "$fields" | grep -E -v "^[^|]+[|]+$"
+	} >"$tgt"
 }
+
 
 # use _db_copy to remove a column
 function db_delete_column
@@ -587,7 +638,7 @@ EOF
 		fi
 	done < <(db_columns -f "$file" 2>/dev/null)
 	if ! $found; then
-		if [[ -n "$colname" ]]; then
+		if [[ -n "${colname:-}" ]]; then
 			_db_func_error "Table has no such column: $colname"
 		else
 			_db_func_error "Table has no default column to remove"
@@ -604,6 +655,7 @@ EOF
 		cat "$tmp" >"$file"
 	)
 }
+
 
 # trim a table, removing unused columns
 function db_trim
@@ -653,6 +705,7 @@ EOF
 		cat "$tmp" >"$file"
 	)
 }
+
 
 # search for a key given a full or partial value
 function db_search
@@ -741,6 +794,7 @@ EOF
 	fi
 }
 
+
 # set a value
 function db_set
 {
@@ -771,7 +825,7 @@ _db_help <<"EOF"
 				Which column to modify
 				If this is not specified, the default unnamed column is used
 			-i <index>
-				When dealing with list values, specify an index to insert the values add
+				When dealing with list values, specify an index at which to insert the values
 				Only makes sense in conjunction with "-m add"
 				Without -i, added values will be appended to the end of the list
 				This can also be used to reorder one or more items in the list
@@ -802,10 +856,10 @@ EOF
 	# sanity
 	[[ -n "${file:-}" ]] || { _db_noparam "-f <file>"; return 1; }
 	[[ -n "${key:-}" ]] || { _db_noparam "-k <key>"; return 1; }
-	[[ "${index:-0}" =~ [0-9]+ ]] || { _db_func_error "Invalid index: $index"; return 1; }
+	[[ "${index:-0}" =~ ^[0-9]+$ ]] || { _db_func_error "Invalid index: $index"; return 1; }
 	case "${mode:-}" in
 		'') ;;
-		add|remove) ! $stdin || { _db_func_error "-m and -I are mutually exclusive"; return 1; } ;;
+		add|rem|remove) ! $stdin || { _db_func_error "-m and -I are mutually exclusive"; return 1; } ;;
 		*) _db_func_error "Unknown mode (add|remove): $mode"; return 1 ;;
 	esac
 	(( $# == 0 )) || { _db_extra_opt "$@"; return 1; }
@@ -872,7 +926,7 @@ EOF
 					fi
 				)
 			;;
-			remove)
+			rem|remove)
 				mapfile -t values < <(
 					while read -r -d ',' s; do
 						[[ -n "$s" ]] || continue
@@ -890,7 +944,7 @@ EOF
 
 		# unset empty values at the back of the row
 		for (( i=${#row[@]}-1; i > 0; i-- )); do
-			[[ -z "${row[i]}" ]] && unset row[i] || break
+			[[ -z "${row[i]}" ]] && unset 'row[i]' || break
 		done
 
 		# if we still have more than just a key, write the row
@@ -902,6 +956,7 @@ EOF
 		cat "$tmp" >"$file"
 	)
 }
+
 
 # list keys
 function db_keys
@@ -961,6 +1016,7 @@ EOF
 	done
 }
 
+
 # list columns
 function db_columns
 {
@@ -1012,6 +1068,7 @@ EOF
 	done <<<"${colspec#|}|"
 }
 
+
 # check if key exists
 function db_has_key
 {
@@ -1055,6 +1112,7 @@ EOF
 	# find it!
 	_db_get_row "$file" "$(_db_encode "$key")" >/dev/null 2>&1
 }
+
 
 # check if column exists
 function db_has_column
@@ -1171,8 +1229,13 @@ EOF
 	db_dump -f "$file"
 }
 
+
 # filter data for dump
-function _db_print_filter { sed -e 's/[^[:print:]]//g'; }
+if type iconv >/dev/null 2>&1 && iconv --help >/dev/null 2>&1; then
+	function _db_print_filter { sed -e 's/[^[:print:]]//g' | iconv --from-code=UTF8 -c 2>/dev/null; }
+else
+	function _db_print_filter { sed -e 's/[^[:print:]]//g'; }
+fi
 function _db_dump_filter
 {
 	_db_print_filter | tr '\n' ' ' | tr -d '\r\t' | tr -s ' ' |
@@ -1185,6 +1248,7 @@ function _db_dump_filter
 		_db_print "$value"
 	}
 }
+
 
 # dump a database as text
 function db_dump
@@ -1263,7 +1327,7 @@ EOF
 			trap "rm \"$tmp\"" EXIT
 
 			# copy the column spec
-			! $header || head -n 1 "$file" >"$tmp"
+			_db_get_head "$file" >"$tmp"
 
 			# copy data
 			for key in "${keys[@]}"; do
@@ -1278,7 +1342,11 @@ EOF
 			db_trim -f "$tmp"
 
 			# output
-			cat "$tmp"
+			if $header; then
+				cat "$tmp"
+			else
+				_db_get_data "$tmp"
+			fi
 		)
 		return 0
 	fi
@@ -1397,6 +1465,7 @@ EOF
 	_db_separator | sed -e "s/ /$box_top/g" -e "s/$box_pipe/$box_t2/g" -e "s/{/$box_cbl/g" -e "s/}/$box_cbr/g"
 }
 
+
 # rename column
 function db_rename_column
 {
@@ -1485,6 +1554,7 @@ EOF
 	)
 }
 
+
 # rename (change key)
 function db_rename
 {
@@ -1541,6 +1611,7 @@ EOF
 	db_copy_row -f "$file" -k "$key" -t "$target" $copy_opt
 	db_delete -f "$file" -k "$key"
 }
+
 
 # copy a row
 function db_copy_row
@@ -1621,8 +1692,10 @@ EOF
 	} >>"$file"
 }
 
+
 # db summing tool, only used for testing. we don't worry about security here
 function _db_sum { md5sum "$@" | cut -d ' ' -f 1; }
+
 
 # run a self test
 function db_selftest
@@ -1923,6 +1996,42 @@ EOF
 			exit 1
 		fi
 
+		# trim bug test
+		_db_tsprint "Trim bug: "
+		>"$tmp"
+		add "a" "" "3"
+		add "a" "4"
+		add "a" "2" "3"
+		add "a" "" "3"
+		if db_trim -f "$tmp" && db_verify -f "$tmp"; then
+			_db_println "OK"
+		else
+			_db_println "FAIL"
+			exit 1
+		fi
+
+
+		# arrays
+		_db_tsprint "Array values: "
+		>"$tmp"
+		db_set -f "$tmp" -k "a" -c "" -v "a 1"
+		db_set -f "$tmp" -k "b" -c "col" -v "b 1"
+		db_set -f "$tmp" -k "a" -m add -v "a 4"
+		db_set -f "$tmp" -k "a" -m add -i 1 -v "a 3"
+		db_set -f "$tmp" -k "a" -m add -i 1 -v "a 2"
+		db_set -f "$tmp" -k "a" -m add -i 1 -v "a 2"
+		db_set -f "$tmp" -k "a" -m add -i 1 -v "a 312"
+		db_set -f "$tmp" -k "a" -m add -i 20 -v "a end"
+		db_set -f "$tmp" -k "a" -m remove -v "a 312"
+		db_set -f "$tmp" -k "a" -m rem -v "a 312"
+		if diff <(db_get -f "$tmp" -k "a" -h) <(printf '%s\n' "a 1" "a 2" "a 3" "a 4" "a end"); then
+			_db_println "OK"
+		else
+			_db_println "FAIL"
+			exit 1
+		fi
+
+
 		# default column should be allowed in any order (bug test)
 		_db_tsprint "Default first column: "
 		>"$tmp"
@@ -1977,6 +2086,31 @@ EOF
 		# drawing the testdb
 		_db_tsprint "Table drawing: "
 		if [[ "$(db_dump -f "$tmp" | _db_sum)" = "877a01267bd9428a3202dff0fad55bd1" ]]; then
+			_db_println "OK"
+		else
+			_db_println "FAIL"
+			exit 1
+		fi
+
+		# refuse garbage files
+		_db_tsprint "No garbage: "
+		_db_print "garbage" >"$tmp"
+		head -c 1024 /dev/urandom >>"$tmp"
+		if ! _db_verify -f "$tmp" 2>/dev/null; then
+			_db_println "OK"
+		else
+			_db_println "FAIL"
+			exit 1
+		fi
+
+		# UTF-8
+		_db_tsprint "UTF-8: "
+		>"$tmp"
+		add $'\xe1\xb8\x89' $'\xe2\x9d\xa4'
+		add $'\xe2\x9d\xa4' $'\xc3\x98'
+		verify $'\xe1\xb8\x89' $'\xe2\x9d\xa4'
+		verify $'\xe2\x9d\xa4' $'\xc3\x98'
+		if [[ "$(db_dump -f "$tmp" | _db_sum)" = "980bdba5cb46751f049501191619868e" ]]; then
 			_db_println "OK"
 		else
 			_db_println "FAIL"

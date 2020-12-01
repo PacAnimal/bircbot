@@ -20,12 +20,12 @@ if [[ -n "$reply" ]]; then
 	case "$data" in
 		"debug")
 			if admin_verbosehas "$(src_host)"; then
-				if ! $_sf_verbose; then
+				if ! $verbose; then
 					reply "Debug mode: On"
-					_sf_verbose=true
+					verbose=true
 				else
 					reply "Debug mode: Off"
-					_sf_verbose=false
+					verbose=false
 				fi
 			fi
 		;;

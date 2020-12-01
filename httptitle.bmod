@@ -18,7 +18,7 @@
 
 if ! isset "httptitle_data"; then
 	httptitle_data="$(sf_tmpdir)/httptitle_$$.dat"
-	sf_mkfile -qf "$httptitle_data" >/dev/null
+	sf_mkfile -qf "$httptitle_data" -o _
 fi
 
 function httptitle_canprint
@@ -27,7 +27,7 @@ function httptitle_canprint
 	craplimiter "$httptitle_data" "$host" "${HTTPTITLE_DELAY:-10}" "$add"
 }
 
-function httptitle_grab { curl -f -m10 "$@"; }
+function httptitle_grab { timeout -s9 15 curl -f -L -m10 "$@"; }
 
 function httptitle_do
 {
@@ -52,18 +52,12 @@ function httptitle_do
 				nslookup "$domain" >/dev/null 2>&1 || continue
 			fi
 
-			for ((i=0; i<5; i++)); do
-				loc=$(httptitle_grab -I --url "$url" | sed -n 's/^Location: //p' | tr -d '\r\n')
-				[[ -n "$loc" ]] || break
-				url=$loc
-			done
-
 			httptitle_grab --url "$url" >"$tmp" 2>/dev/null || continue
 
 			title="$(perl -l -0777 -ne 'print $1 if /<title.*?>\s*(.*?)\s*<\/title/si' 2>/dev/null <"$tmp")"
 			[[ -n "$title" ]] || title="$(file -bN "$tmp")"
 			if ! type recode >/dev/null 2>&1; then
-				sf_error "recode is not installed! Can not print http title safely."
+				sf_println2 "Error: recode is not installed! Can not print http title safely."
 				return
 			fi
 			title=$(sf_web2sane -p <<<"$title" | sf_oneline)

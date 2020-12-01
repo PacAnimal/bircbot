@@ -23,11 +23,11 @@ then
 		"NickServ!NickServ@services.") # freenode
 			case "$data" in
 				"This nickname is registered."*)
-					sf_stdoutv "$MOD: identifying"
+					! $verbose || sf_println "$MOD: identifying"
 					tx "PRIVMSG $(src_nick) :IDENTIFY $NICK $PASS"
 				;;
 				"Invalid password for ${NICK}.")
-					sf_error "Nickserv told us our password was invalid :("
+					sf_println2 "Error: Nickserv told us our password was invalid :("
 					exit 1
 				;;
 			esac
@@ -40,7 +40,7 @@ function nickserv_tick
 {
 	[[ "$nick" != "$NICK" ]] || return 0
 	sf_timer "nickserv" 10 || return 0
-	sf_stdoutv "$MOD: Wrong name! Attempting to change!"
+	! $verbose || sf_println "$MOD: Wrong name! Attempting to change!"
 	tx "NICK $NICK"
 }
 nickserv_tick

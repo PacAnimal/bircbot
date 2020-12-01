@@ -99,13 +99,20 @@
 # v1.40, 2017-10-01 - Switched to using bashdb for large tables previously stored space
 #                     separated in memory
 #
+# v1.41, 2020-01-12 - Cleaned up the console output somewhat
+#
+# v1.42, 2020-04-06 - Support for storing database files separately from the configuration
+#                     See $CONFIG and $DATA
+#
+# v1.43, 2020-04-18 - Fix Docker watchdog functionality
+#
 
 _scriptname="bircbot"
 set -e
 set -u
 
 # version
-VERSION=("BIRCBOT" "v1.40")
+VERSION=("BIRCBOT" "v1.43")
 
 # statics
 declare -ri STATE_INIT=0
@@ -132,12 +139,12 @@ ssource /cathedral/src/lib/bashdb "${botdir}/bashdb"
 ssource /cathedral/userbin/.bircbot/irccodes.src "${botdir}/irccodes.src"
 
 # print bircbot version
-sf_stdout "${VERSION[@]}"
+sf_println "${VERSION[@]}"
 
 # print bash version, and quit if version is too low
-sf_stdout "Running on Bash version: $BASH_VERSION"
+sf_println "Running on Bash version: $BASH_VERSION"
 if (( BASH_VERSINFO[0] < 4 )); then
-	sf_error "$_scriptname requires Bash 4 to run!"
+	sf_println2 "Error: $_scriptname requires Bash 4 to run!"
 	exit 1
 fi
 
@@ -165,7 +172,7 @@ EOF
 function isset { declare -p "$@" >/dev/null 2>&1; }
 
 # read options
-_sf_verbose=false
+verbose=false
 moddebug=false
 use_ncat=false
 OPTIND=1
@@ -173,8 +180,8 @@ while getopts ":nvV" opt; do
 	case "$opt" in
 		n) use_ncat=true ;;
 		v)
-			if ! $_sf_verbose; then
-				_sf_verbose=true
+			if ! $verbose; then
+				verbose=true
 			else
 				set -x
 			fi
@@ -198,17 +205,18 @@ if [[ "${1:-}" = "--" ]]; then shift; fi
 # config
 CONFIG="${1:-"${CONFIG:-"${HOME}/.bircbot"}"}"
 if ! source "$CONFIG/bircbot.conf" 2>/dev/null; then
-	sf_error "Unable to read $CONFIG/bircbot.conf"
-	sf_stderr
-	sf_stderr "To configure, try this:"
-	sf_stderr "  mkdir ${HOME}/.bircbot"
-	sf_stderr "  cp /cathedral/userbin/.bircbot/bircbot.conf.example ${HOME}/.bircbot/bircbot.conf"
-	sf_stderr "    * edit ${HOME}/.bircbot/bircbot.conf using your favorite editor *"
-	sf_stderr "  run the bot :)"
+	sf_println2 "Error: Unable to read $CONFIG/bircbot.conf"
+	sf_println2
+	sf_println2 "To configure, try this:"
+	sf_println2 "  mkdir ${HOME}/.bircbot"
+	sf_println2 "  cp /cathedral/userbin/.bircbot/bircbot.conf.example ${HOME}/.bircbot/bircbot.conf"
+	sf_println2 "    * edit ${HOME}/.bircbot/bircbot.conf using your favorite editor *"
+	sf_println2 "  run the bot :)"
 	exit 1
 fi
 
 # variables
+DATA=${DATA:-"$CONFIG"}
 SERVER=${SERVER:-"irc.freenode.net"}
 PORT=${PORT:-"6667"}
 SSL=${SSL:-false}
@@ -229,6 +237,7 @@ FLOOD_COUNT=${FLOOD_COUNT:-4}
 FLOOD_TIME=${FLOOD_TIME:-10}
 PING_TIME=${PING_TIME:-120}
 TIMEOUT=${TIMEOUT:-600}
+HEART=${HEART:-""}
 
 # misc
 isset floodcheck || declare -A floodcheck=()
@@ -247,12 +256,12 @@ fi
 # find the cat
 if $use_ncat; then
 	if ! type "ncat" &>/dev/null; then
-		sf_error 'Unable to find the "ncat" command. Install NMap, or modify your $PATH'
+		sf_println2 'Error: Unable to find the "ncat" command. Install NMap, or modify your $PATH'
 		exit 1
 	fi
 else
 	if ! type "nc" &>/dev/null; then
-		sf_error 'Unable to find the "nc" command. Install NetCat, or modify your $PATH'
+		sf_println2 'Error: Unable to find the "nc" command. Install NetCat, or modify your $PATH'
 		exit 1
 	fi
 fi
@@ -263,18 +272,18 @@ function cleanup
 	code=$?
 	set +e
 	if [[ -n "$catpid" ]]; then
-		if kill -0 $catpid 2>/dev/null; then
-			sf_stdout "Killing the cat($catpid)"
-			kill -TERM $catpid
+		if kill -0 "$catpid" 2>/dev/null; then
+			sf_println "Killing the cat (pid:${catpid})"
+			kill -TERM "$catpid" 2>/dev/null || :
 		else
-			sf_stdout "The cat isn't running"
+			sf_println "The cat isn't running"
 		fi
 	fi
 	sf_killchildren
-	sf_stdout "Waiting for all children to die"
+	sf_println "Waiting for all children to die"
 	wait
 	sf_rm_process
-	sf_stdout "Cleanup complete"
+	sf_println "Clean exit"
 }
 trap cleanup EXIT
 
@@ -300,7 +309,7 @@ function unset_on_reset
 			done
 		fi
 		unset_on_reset+=( "$1" )
-		sf_stdoutv "Unset on reset: $1"
+		! $verbose || sf_println "Unset on reset: $1"
 	fi
 	return 0
 }
@@ -326,7 +335,7 @@ function craplimiter
 
 	>"$crap_data"
 	for line in "${lines[@]:-}"; do
-		echo "$line" >>"$crap_data"
+		sf_println "$line" >>"$crap_data"
 	done
 	
 	exit $code
@@ -352,11 +361,11 @@ function fcurl { CURL_PROXY='' curl "$@"; }
 function startnetcat
 {
 	state=$STATE_INIT
-	sf_stdout "State: init"
+	sf_println "State: init"
 	unset_on_reset
 
 	# generate fifo's for communication between subshells
-	sf_stdoutv "Generating FIFO's"
+	! $verbose || sf_println "Generating FIFO's"
 	if [[ -n "${rx:-}" ]]; then
 		rm "$rx"
 		sf_rm_abort "$rx"
@@ -366,24 +375,24 @@ function startnetcat
 		sf_rm_abort "$tx"
 	fi
 	sf_mkfifo -qo tx
-	sf_stdoutv "TX: $tx"
+	! $verbose || sf_println "TX: $tx"
 	sf_mkfifo -qo rx
-	sf_stdoutv "RX: $rx"
+	! $verbose || sf_println "RX: $rx"
 
 	# go cat go
 	if $use_ncat; then
-		ncat "$(! $SSL || echo "--ssl")" "$SERVER" "$PORT" >"$rx" <"$tx" &
+		ncat "$(! $SSL || sf_print "--ssl")" "$SERVER" "$PORT" >"$rx" <"$tx" & disown
 	else
-		nc "$SERVER" "$PORT" >"$rx" <"$tx" &
+		nc "$SERVER" "$PORT" >"$rx" <"$tx" & disown
 	fi
 	exec 3<"$rx" 4>"$tx"
 	catpid=$!
 	hidden=false
-	connect_time=$(sf_unixtime)
+	connect_time=$SECONDS
 	last_rx=$SECONDS
 	ping_target=""
-	sf_stdout "Connecting..."
-	sf_stdoutv "Cat: $catpid"
+	sf_println "Connecting..."
+	! $verbose || sf_println "Cat: $catpid"
 }
 startnetcat
 
@@ -393,11 +402,11 @@ function tx
 	((++TXCOUNT))
 	local text="$*"
 	if (( ${#text} > MAXLENGTH )); then
-		sf_warning "Output text limited to $MAXLENGTH characters!"
+		sf_println2 "Warning: Output text limited to $MAXLENGTH characters!"
 		text=${text:0:$MAXLENGTH}
 	fi
-	sf_stdout "TX: $*"
-	echo "$*" >&4
+	sf_println "TX: $*"
+	sf_println "$*" >&4
 }
 
 # perform an action (like /me in mIRC)
@@ -406,7 +415,7 @@ function action
 	local reply=$1
 	shift
 	if [[ -z "${reply:-}" ]]; then
-		sf_error "$FUNCNAME was called without a valid reply target!"
+		sf_println2 "Error: $FUNCNAME was called without a valid reply target!"
 		exit 1
 	fi
 	tx "PRIVMSG $reply :"$'\x01'"ACTION $*"$'\x01'
@@ -426,22 +435,22 @@ function action_all
 function faction
 {
 	if [[ -z "${reply:-}" ]]; then
-		sf_error "$FUNCNAME was called without a valid reply target!"
+		sf_println2 "Error: $FUNCNAME was called without a valid reply target!"
 		exit 1
 	fi
 	if (( $# != 0 )); then
 		local priority=$1
-		if ! sf_integer -vq -- "$priority"; then
-			sf_error "Invalid priority in call to $FUNCNAME"
+		if ! sf_integer -v -- "$priority"; then
+			sf_println2 "Error: Invalid priority in call to $FUNCNAME"
 			exit 1
 		fi
 		shift
 		local message="$*"
 		if [[ -z "$message" ]]; then
-			sf_error "No message in call to $FUNCNAME"
+			sf_println2 "Error: No message in call to $FUNCNAME"
 			exit 1
 		fi
-		sf_stdoutv "$FUNCNAME: Adding fallback action \"$message\" with priority $priority"
+		! $verbose || sf_println "$FUNCNAME: Adding fallback action \"$message\" with priority $priority"
 		bircbot_factions[$priority]=$message
 	else
 		local priority=-1 p
@@ -468,7 +477,7 @@ function say
 		[[ -z "${reply:-}" ]] ||
 		[[ -z "$*" ]]
 	then
-		sf_error "$FUNCNAME was called with invalid parameters!"
+		sf_println2 "Error: $FUNCNAME was called with invalid parameters!"
 		exit 1
 	fi
 	tx "PRIVMSG $reply :$*"
@@ -488,11 +497,11 @@ function say_all
 function reply
 {
 	if [[ -z "${reply:-}" ]]; then
-		sf_error "$FUNCNAME was called without a valid reply target!"
+		sf_println2 "Error: $FUNCNAME was called without a valid reply target!"
 		exit 1
 	fi
-	if [[ -z "$@" ]]; then
-		sf_warning "$FUNCNAME was called with no text"
+	if [[ -z "$*" ]]; then
+		sf_println2 "Warning: $FUNCNAME was called with no text"
 		return
 	fi
 	if [[ "$reply" = "#"* ]]; then
@@ -508,22 +517,22 @@ function reply
 function freply
 {
 	if [[ -z "${reply:-}" ]]; then
-		sf_error "$FUNCNAME was called without a valid reply target!"
+		sf_println2 "Error: $FUNCNAME was called without a valid reply target!"
 		exit 1
 	fi
 	if (( $# != 0 )); then
 		local priority=$1
-		if ! sf_integer -vq -- "$priority"; then
-			sf_error "Invalid priority in call to $FUNCNAME"
+		if ! sf_integer -v -- "$priority"; then
+			sf_println2 "Error: Invalid priority in call to $FUNCNAME"
 			exit 1
 		fi
 		shift
 		local message="$*"
 		if [[ -z "$message" ]]; then
-			sf_error "No message in call to $FUNCNAME"
+			sf_println2 "Error: No message in call to $FUNCNAME"
 			exit 1
 		fi
-		sf_stdoutv "$FUNCNAME: Adding fallback reply \"$message\" with priority $priority"
+		! $verbose || sf_println "$FUNCNAME: Adding fallback reply \"$message\" with priority $priority"
 		bircbot_freplies[$priority]=$message
 		bircbot_freplynicks[$priority]=${reply_nick:-"$(src_nick)"}
 	else
@@ -546,7 +555,7 @@ function freply
 # check if an admin is speaking - should be overridden by admin.bmod or another mod
 function admin_has
 {
-	sf_warning "Default implementation of $FUNCNAME was called. This should never happen!"
+	sf_println2 "Warning: Default implementation of $FUNCNAME was called. This should never happen!"
 	exit 1
 }
 # same as admin_has, but reply if admin access is not granted - should be overridden by admin.bmod or another mod
@@ -577,13 +586,13 @@ function log_output
 function floodcheck
 {
 	if ! ${FLOOD_CHECK:-true}; then
-		sf_stdoutv "$FUNCNAME: Flood checking disabled"
+		! $verbose || sf_println "$FUNCNAME: Flood checking disabled"
 		return 0
 	fi
 	local nick=$1 warn=true now i count=0 silent=${2:-false}
 	now=$(sf_unixtime)
 	if ! $silent && [[ -z "${reply:-}" ]]; then
-		sf_error "$FUNCNAME was called non-silently without a valid reply target!"
+		sf_println2 "Error: $FUNCNAME was called non-silently without a valid reply target!"
 		exit 1
 	fi
 	isset times || declare -a times=()
@@ -595,11 +604,11 @@ function floodcheck
 		done
 	fi
 	if ((${#times[@]} >= FLOOD_COUNT)); then
-		unset "times[0]"
+		unset 'times[0]'
 	fi
 	times[FLOOD_COUNT]=$now
 	if ((count >= FLOOD_COUNT)); then
-		sf_stdoutv "$FUNCNAME ($1): DENY message"
+		! $verbose || sf_println "$FUNCNAME ($1): DENY message"
 		if ! $silent && $warn; then
 			reply "Whoa! Relax! You are flooding the bot! Please wait 10 seconds and try again."
 			warn=false
@@ -607,7 +616,7 @@ function floodcheck
 		floodcheck["$nick"]="$warn ${times[*]}"
 		return 1
 	else
-		sf_stdoutv "$FUNCNAME ($1): ALLOW message"
+		! $verbose || sf_println "$FUNCNAME ($1): ALLOW message"
 		warn=true
 		floodcheck["$nick"]="$warn ${times[*]}"
 		return 0
@@ -617,16 +626,16 @@ function floodcheck
 # perform a clean exit on SIGINT (ctrl+c)
 function clean_exit
 {
-	trap - INT
-	sf_stdoutv
-	if ((state != STATE_SHUTDOWN)) || ((state == STATE_RUNNING)); then
-		sf_stdout "State: shutdown"
+	trap 'exit 0' HUP INT TERM
+	trap : PIPE
+	! $verbose || sf_println
+	if ((state != STATE_SHUTDOWN)); then
+		sf_println "State: shutdown"
 		state=$STATE_SHUTDOWN
 		tx "QUIT :$QUITMSG"
 	fi
-	sleep 1
 }
-trap clean_exit INT
+trap clean_exit HUP INT TERM
 
 # function to cut our address character or nick off of the data
 function data_address_size
@@ -637,7 +646,7 @@ function data_address_size
 
 	# addressing by the address character(s)
 	if [[ "$lowdata" = "$lowadd"* ]]; then
-		echo "${#ADDRESS}"
+		sf_println "${#ADDRESS}"
 		return 0
 	fi
 
@@ -647,7 +656,7 @@ function data_address_size
 		[[ "$lowdata" = "${lownick}: "* ]] ||
 		[[ "$lowdata" = "${lownick} "* ]]
 	then
-		echo "$((${#nick}+1))"
+		sf_println "$((${#nick}+1))"
 		return 0
 	fi
 
@@ -657,12 +666,12 @@ function data_address_size
 		[[ "$lowdata" = "@${lownick}: "* ]] ||
 		[[ "$lowdata" = "@${lownick} "* ]]
 	then
-		echo "$((${#nick}+2))"
+		sf_println "$((${#nick}+2))"
 		return 0
 	fi
 
 	# not addressing the bot
-	echo "0"
+	sf_println "0"
 	return 1
 }
 function cutdata
@@ -686,11 +695,11 @@ function cutdata
 # get info from $src
 function src_nick
 {
-	echo -n "${src%%\!*}"
+	sf_print "${src%%\!*}"
 }
 function src_host
 {
-	echo -n "${src#*\!}"
+	sf_print "${src#*\!}"
 }
 
 # get data from a given case insensitive word
@@ -704,22 +713,22 @@ function dfrom
 		read -r cut <<<"${cut#* }"
 	done
 	read -r cut <<<"${cut#* }"
-	echo "$cut"
+	sf_println "$cut"
 }
 
 # get data from a given index
 function dfromi
 {
 	local i="$*"
-	if ! sf_integer -vq -- "$i" || ! (( i )); then
-		sf_error "Invalid index in call to $FUNCNAME"
+	if ! sf_integer -v -- "$i" || ! (( i )); then
+		sf_println2 "Error: Invalid index in call to $FUNCNAME"
 		exit 1
 	fi
 	local cut="$data"
 	while (( i-- )); do
 		read -r cut <<<"${cut#* }"
 	done
-	echo "$cut"
+	sf_println "$cut"
 }
 
 # utility function to cut ctcp from text
@@ -730,13 +739,13 @@ function filtertext
 
 # utility function to cut one character off of the right
 # bash 4.2.37 (debian wheezy) has a bug with %?
-# $ a='foo\'; echo ${a%?}
+# $ a='foo\'; sf_println "${a%?}"
 # foo\
 function cutright
 {
 	local line="$*"
 	if [[ -n "$line" ]]; then
-		echo -n "${line:0:$((${#line}-1))}"
+		sf_print "${line:0:$((${#line}-1))}"
 	fi
 }
 
@@ -756,7 +765,7 @@ function network_error
 		sf_goodfile "$eh" || continue
 		source "$eh" && return 0 || return 1
 	done
-	sf_stdout "No error handler for $NETWORK"
+	sf_println "No error handler for $NETWORK"
 	return 1
 }
 
@@ -769,16 +778,20 @@ function tick
 	(( ++tick ))
 	if (( state != STATE_SHUTDOWN )) && [[ -n "$catpid" ]] && ! kill -0 $catpid 2>/dev/null; then
 		catpid=""
-		sf_error "The cat died!"
+		sf_println2 "Error: The cat died!"
 		startnetcat
+		return
 	fi
 	if (( last_rx + TIMEOUT < SECONDS )); then
-		sf_warning "No messages from server in $((SECONDS-last_rx)) seconds - timeout!"
+		sf_println2 "No messages from server in $((SECONDS-last_rx)) seconds - timeout!"
 		kill -TERM $catpid
 	elif (( last_rx + PING_TIME < SECONDS )) && ! (( tick % 10 )); then
-		sf_warning "No messages from server in $((SECONDS-last_rx)) seconds - ping attempt"
+		sf_println2 "No messages from server in $((SECONDS-last_rx)) seconds - ping attempt"
 		tx "PING :$nick"
 		[[ -z "$ping_target" ]] || tx "PONG $ping_target"
+	fi
+	if [[ -n "$HEART" ]] && (( connect_time + 180 < SECONDS )) && (( last_rx + 300 > SECONDS )); then
+		sf_timestamp_short >"$HEART"
 	fi
 }
 
@@ -801,7 +814,7 @@ while true; do
 
 		# read the line and print it
 		line=${line%$'\r'}
-		echo "RX: $line"
+		sf_println "RX: $line"
 
 		# reset variables
 		botnick="$nick"	# our current nick
@@ -885,12 +898,12 @@ while true; do
 		data_count=${#data_array[*]}
 
 		# print what we parsed
-		sf_stdoutv "src:	$src"
-		sf_stdoutv "cmd:	$cmd"
-		sf_stdoutv "target: $target"
-		sf_stdoutv "data:   $data"
-		sf_stdoutv "srv:	$srv"
-		sf_stdoutv "reply:	$reply"
+		! $verbose || sf_println "src:	$src"
+		! $verbose || sf_println "cmd:	$cmd"
+		! $verbose || sf_println "target: $target"
+		! $verbose || sf_println "data:   $data"
+		! $verbose || sf_println "srv:	$srv"
+		! $verbose || sf_println "reply:	$reply"
 
 		# respond to commands
 		case "${cmd^^}" in
@@ -907,7 +920,7 @@ while true; do
 						if [[ -n "${CUSTOMVERSION:-}" ]]; then
 							tx "NOTICE $(src_nick) :"$'\x01'"VERSION $CUSTOMVERSION"$'\x01'
 						else
-							tx "NOTICE $(src_nick) :"$'\x01'"VERSION $(IFS=":"; echo -n "${VERSION[*]}"):Bash ${BASH_VERSION}"$'\x01'
+							tx "NOTICE $(src_nick) :"$'\x01'"VERSION $(IFS=":"; sf_print "${VERSION[*]}"):Bash ${BASH_VERSION}"$'\x01'
 						fi
 					;;
 					TIME)
@@ -922,22 +935,22 @@ while true; do
 			NOTICE)
 				data=${data#$'\x01'}
 				data=${data%$'\x01'}
-				sf_stdoutv "We received a notice"
+				! $verbose || sf_println "We received a notice"
 			;;
 			NICK)
 				if [[ "$(src_nick)" = "$nick" ]]; then
 					nick=${target#:}
-					sf_stdoutv "This bot is now known as $nick"
+					! $verbose || sf_println "This bot is now known as $nick"
 				else
-					sf_stdoutv "$(src_nick) is now known as ${target#:}"
+					! $verbose || sf_println "$(src_nick) is now known as ${target#:}"
 				fi
 			;;
 			ERROR)
 				if ((state == STATE_SHUTDOWN)); then
-					sf_stdoutv "IRC server closed the connection in response to our QUIT message. Exiting."
+					! $verbose || sf_println "IRC server closed the connection in response to our QUIT message. Exiting."
 					exit 0
 				else
-					sf_stdout "IRC server reported an error. Exiting."
+					sf_println "IRC server reported an error. Exiting."
 					exit 1
 				fi
 			;;
@@ -954,21 +967,21 @@ while true; do
 				$ERR_NICKNAMEINUSE)
 					guestnick
 					if ! network_error; then
-						sf_error "Nickname is already in use."
+						sf_println2 "Error: Nickname is already in use."
 						exit 1
 					fi
 				;;
 				$ERR_UNAVAILRESOURCE)
 					guestnick
 					if ! network_error; then
-						sf_error "Nickname is temporarily unavailable."
+						sf_println2 "Error: Nickname is temporarily unavailable."
 						exit 1
 					fi
 				;;
 				$RPL_ENDOFMOTD|$ERR_NOMOTD)
 					if ((state == STATE_CONNECTED)); then
 						state=$STATE_RUNNING
-						sf_stdout "State: running"
+						sf_println "State: running"
 					fi
 				;;
 			esac
@@ -978,7 +991,7 @@ while true; do
 		case "$state" in
 			$STATE_INIT)
 				state=$STATE_CONNECTED
-				sf_stdout "State: connected"
+				sf_println "State: connected"
 				tx "PASS $PASS"
 				tx "NICK $NICK"
 				tx "USER ${USER} ${MODE} * :${NAME}"
@@ -1002,9 +1015,9 @@ while true; do
 				for module in "$CONFIG/"*".bmod" "${botdir}/"*".bmod" "/cathedral/userbin/.bircbot/"*".bmod"; do
 					MOD=${module##*/}
 					MOD=${MOD%.bmod}
-					! $moddebug || sf_stdoutv "ModName: $MOD"
+					! $moddebug || ! $verbose || sf_println "ModName: $MOD"
 					if sf_inarray "$MOD" "${modules[@]:-}"; then
-						sf_stdoutv "Skipping $MOD - local version already run."
+						! $verbose || sf_println "Skipping $MOD - local version already run."
 						continue
 					fi
 					modules+=( "$MOD" )
@@ -1041,7 +1054,7 @@ while true; do
 		esac
 
 		# print txcount if non-zero
-		((TXCOUNT == 0)) || sf_stdoutv "TXCOUNT: $TXCOUNT"
+		((TXCOUNT == 0)) || ! $verbose || sf_println "TXCOUNT: $TXCOUNT"
 	fi
 
 	# tick ahead...

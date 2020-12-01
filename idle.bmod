@@ -86,7 +86,7 @@ function probe_do
 	(
 		for verb in FINGER VERSION SOURCE USERINFO CLIENTINFO TIME; do
 			echo "PRIVMSG $nick :"$'\x01'"$verb"$'\x01' >"$FIFO"
-			sleep 11
+			sf_sleep 11
 		done
 	) &
 }
