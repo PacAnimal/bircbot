@@ -3,12 +3,13 @@
 # SERVER
 SERVER="irc.freenode.net"
 PORT="6667"
+SSL=false
 
 # MAX LENGTH OF TEXT
 #MAXLENGTH=400
 
 # BOT NICK/USER
-NICK="mybot"
+NICK="mybot-$((RANDOM%10000+10000))"
 PASS="password"
 NAME="droid"
 USER="bot"

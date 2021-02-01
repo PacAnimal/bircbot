@@ -157,6 +157,9 @@ function sf_fcopy
 
 # get unix time
 function sf_unixtime { date "$@" +'%s'; }
+function sf_unixtime_ms { date "$@" +'%s%N' | head -c -7; }
+function sf_unixtime_us { date "$@" +'%s%N' | head -c -4; }
+function sf_unixtime_ns { date "$@" +'%s%N'; }
 
 # get a standard cathedral timestamp
 function sf_timestamp { date "$@" +'%Y-%m-%d %H:%M:%S %z'; }
@@ -2880,7 +2883,7 @@ function sf_wc
 }
 
 # check if any data is returned
-function sf_any { (( $(sf_wc -c) )); }
+function sf_any { grep -q '^'; }
 
 # get the passwd line of a user
 function sf_passwdline

@@ -3,9 +3,10 @@
 # SERVER
 SERVER="irc.freenode.net"
 PORT="6667"
+SSL=false
 
 # BOT NICK/USER
-NICK="bbGhost"
+NICK="bbGhost-$((RANDOM%10000+10000))"
 PASS=""
 NAME="gh0st"
 USER="bb"
